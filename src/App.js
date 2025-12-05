@@ -1,27 +1,28 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, User, LogOut, Send, CheckCircle, XCircle, Clock, FileText, Users, Home } from 'lucide-react';
+import { LogOut, Send, CheckCircle, XCircle, Clock, FileText, Home, UserPlus } from 'lucide-react';
+import { signUp, signIn, logout, onAuthChange } from './firebase/authService';
+import { applyLeave, getUserLeaves, getAllLeaves, hodAction, principalAction } from './firebase/leaveService';
+import logo from './assets/logo.png';
+import { collection, getDocs } from 'firebase/firestore';
+import { db } from './firebase/config';
 
-// Demo users data
-const DEMO_USERS = {
-  'staff@example.com': { password: '123456', role: 'staff', name: 'Dr. Rajesh Kumar', department: 'Computer Science' },
-  'hod@example.com': { password: '123456', role: 'hod', name: 'Dr. Priya Sharma', department: 'Computer Science' },
-  'principal@example.com': { password: '123456', role: 'principal', name: 'Dr. Anil Mehta', department: 'Administration' },
-  'admin@example.com': { password: '123456', role: 'admin', name: 'Admin User', department: 'Administration' }
-};
-
-// Storage keys
-const STORAGE_KEYS = {
-  LEAVES: 'leaves-data',
-  NOTIFICATIONS: 'notifications-data',
-  CURRENT_USER: 'current-user'
-};
-
-const LeaveManagementSystem = () => {
+const App = () => {
+  const [emailStatus, setEmailStatus] = useState('');
   const [currentUser, setCurrentUser] = useState(null);
+  const [userData, setUserData] = useState(null);
   const [leaves, setLeaves] = useState([]);
-  const [notifications, setNotifications] = useState([]);
   const [activeView, setActiveView] = useState('dashboard');
+  const [isLogin, setIsLogin] = useState(true);
+  const [loading, setLoading] = useState(true);
+  
   const [loginForm, setLoginForm] = useState({ email: '', password: '' });
+  const [signupForm, setSignupForm] = useState({
+    fullName: '',
+    email: '',
+    password: '',
+    department: '',
+    role: 'staff'
+  });
   const [leaveForm, setLeaveForm] = useState({
     leaveType: 'Sick Leave',
     startDate: '',
@@ -29,95 +30,163 @@ const LeaveManagementSystem = () => {
     reason: ''
   });
 
-  // Initialize data from storage
+  // Auth state observer
   useEffect(() => {
-    loadData();
+    const unsubscribe = onAuthChange((authData) => {
+      if (authData) {
+        setCurrentUser(authData.user);
+        setUserData(authData.userData);
+        fetchLeaves(authData.userData);
+      } else {
+        setCurrentUser(null);
+        setUserData(null);
+        setLeaves([]);
+      }
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
   }, []);
 
-  // Save data whenever it changes
-  useEffect(() => {
-    if (leaves.length > 0 || notifications.length > 0) {
-      saveData();
-    }
-  }, [leaves, notifications]);
-
-  const loadData = () => {
+  const fetchLeaves = async (user) => {
     try {
-      const storedUser = localStorage.getItem(STORAGE_KEYS.CURRENT_USER);
-      const storedLeaves = localStorage.getItem(STORAGE_KEYS.LEAVES);
-      const storedNotifications = localStorage.getItem(STORAGE_KEYS.NOTIFICATIONS);
-
-      if (storedUser) setCurrentUser(JSON.parse(storedUser));
-      if (storedLeaves) setLeaves(JSON.parse(storedLeaves));
-      if (storedNotifications) setNotifications(JSON.parse(storedNotifications));
+      let result;
+      if (user.role === 'staff') {
+        result = await getUserLeaves(user.uid);
+      } else if (user.role === 'hod') {
+        result = await getAllLeaves(user.department);
+      } else {
+        result = await getAllLeaves();
+      }
+      
+      if (result.success) {
+        setLeaves(result.leaves);
+      }
     } catch (error) {
-      console.error('Error loading data:', error);
+      console.error('Error fetching leaves:', error);
     }
   };
-
-  const saveData = () => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.LEAVES, JSON.stringify(leaves));
-      localStorage.setItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(notifications));
-    } catch (error) {
-      console.error('Error saving data:', error);
-    }
-  };
-
-  const handleLogin = (e) => {
-    e.preventDefault();
-    const user = DEMO_USERS[loginForm.email];
+  // Add this function in App.js
+const checkPrincipalStatus = async () => {
+  try {
+    console.log('=== CHECKING PRINCIPAL STATUS ===');
     
-    if (user && user.password === loginForm.password) {
-      const userData = { email: loginForm.email, ...user };
-      setCurrentUser(userData);
-      localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(userData));
-      setLoginForm({ email: '', password: '' });
-    } else {
-      alert('Invalid credentials! Please check email and password.');
+    // Try to sign in to see if account exists
+    const { signInWithEmailAndPassword } = await import('firebase/auth');
+    const { auth } = await import('./firebase/config');
+    
+    try {
+      const result = await signInWithEmailAndPassword(
+        auth, 
+        'principal@stbcoe.edu', 
+        'Principal@123'
+      );
+      console.log('✅ Principal account EXISTS in Authentication');
+      console.log('Principal UID:', result.user.uid);
+      
+      // Check Firestore
+      const { getDoc, doc } = await import('firebase/firestore');
+      const { db } = await import('./firebase/config');
+      
+      const userDoc = await getDoc(doc(db, 'users', result.user.uid));
+      if (userDoc.exists()) {
+        console.log('✅ Principal data EXISTS in Firestore');
+        console.log('Principal data:', userDoc.data());
+      } else {
+        console.log('❌ Principal data MISSING in Firestore');
+      }
+      
+    } catch (authError) {
+      console.log('❌ Principal account NOT FOUND in Authentication');
+      console.log('Auth error code:', authError.code);
+      console.log('Auth error message:', authError.message);
+    }
+    
+  } catch (error) {
+    console.error('Error checking principal status:', error);
+  }
+};
+  
+  const debugFirestore = async () => {
+    console.log('=== DEBUG FIRESTORE ===');
+    console.log('Current user UID:', currentUser?.uid);
+    console.log('User data:', userData);
+    
+    try {
+      const querySnapshot = await getDocs(collection(db, 'leaves'));
+      const allLeaves = [];
+      querySnapshot.forEach((doc) => {
+        allLeaves.push({ id: doc.id, ...doc.data() });
+      });
+      
+      console.log('All documents in leaves collection:', allLeaves);
+      console.log('Total documents:', allLeaves.length);
+      
+      const myLeaves = allLeaves.filter(leave => leave.staffId === userData?.uid);
+      console.log('My leaves:', myLeaves);
+      
+    } catch (error) {
+      console.error('Debug query error:', error);
     }
   };
 
-  const handleLogout = () => {
-    setCurrentUser(null);
-    localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    
+    const result = await signIn(loginForm.email, loginForm.password);
+    
+    if (result.success) {
+      setLoginForm({ email: '', password: '' });
+      alert('Login successful!');
+    } else {
+      alert(result.error || 'Login failed. Please try again.');
+    }
+    
+    setLoading(false);
+  };
+
+  const handleSignup = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    
+    const result = await signUp(
+      signupForm.email,
+      signupForm.password,
+      signupForm.fullName,
+      signupForm.department,
+      signupForm.role
+    );
+    
+    if (result.success) {
+      setSignupForm({
+        fullName: '',
+        email: '',
+        password: '',
+        department: '',
+        role: 'staff'
+      });
+      alert('Registration successful!');
+    } else {
+      alert(result.error || 'Registration failed. Please try again.');
+    }
+    
+    setLoading(false);
+  };
+
+  const handleLogout = async () => {
+    await logout();
     setActiveView('dashboard');
   };
 
-  const addNotification = (userId, message, leaveId) => {
-    const notification = {
-      id: Date.now() + Math.random(),
-      userId,
-      message,
-      leaveId,
-      timestamp: new Date().toISOString(),
-      read: false
-    };
-    setNotifications(prev => [...prev, notification]);
-  };
-
-  const handleApplyLeave = (e) => {
-    e.preventDefault();
-    
-    const newLeave = {
-      id: Date.now(),
-      staffEmail: currentUser.email,
-      staffName: currentUser.name,
-      department: currentUser.department,
-      leaveType: leaveForm.leaveType,
-      startDate: leaveForm.startDate,
-      endDate: leaveForm.endDate,
-      reason: leaveForm.reason,
-      status: 'Pending',
-      appliedDate: new Date().toISOString(),
-      approverComments: '',
-      hodApprovalDate: null,
-      principalApprovalDate: null
-    };
-
-    setLeaves(prev => [...prev, newLeave]);
-    addNotification(currentUser.email, `Your leave application for ${leaveForm.leaveType} has been submitted successfully.`, newLeave.id);
-    
+  const handleApplyLeave = async (e) => {
+  e.preventDefault();
+  setLoading(true);
+  setEmailStatus('Sending application and email notification...');
+  
+  const result = await applyLeave(leaveForm, userData);
+  
+  if (result.success) {
     setLeaveForm({
       leaveType: 'Sick Leave',
       startDate: '',
@@ -125,123 +194,249 @@ const LeaveManagementSystem = () => {
       reason: ''
     });
     
-    alert('Leave application submitted successfully!');
+    await fetchLeaves(userData);
+    setEmailStatus('✅ Leave applied and email sent successfully!');
+    alert('Leave application submitted successfully! You will receive an email notification.');
     setActiveView('history');
-  };
+    
+    // Clear email status after 3 seconds
+    setTimeout(() => setEmailStatus(''), 3000);
+  } else {
+    setEmailStatus('');
+    alert(result.error || 'Error submitting leave application');
+  }
+  
+  setLoading(false);
+};
 
-  const handleHODAction = (leaveId, action, comments = '') => {
-    setLeaves(prev => prev.map(leave => {
-      if (leave.id === leaveId) {
-        const updatedLeave = {
-          ...leave,
-          status: action === 'approve' ? 'Approved by HOD' : 'Rejected by HOD',
-          approverComments: comments,
-          hodApprovalDate: new Date().toISOString()
-        };
-        
-        addNotification(
-          leave.staffEmail,
-          action === 'approve' 
-            ? `Your leave application has been approved by HOD and forwarded to Principal.`
-            : `Your leave application has been rejected by HOD. Reason: ${comments}`,
-          leaveId
-        );
-        
-        return updatedLeave;
-      }
-      return leave;
-    }));
-  };
+  const handleHODAction = async (leaveId, action) => {
+  const comments = prompt(action === 'approve' ? 'Enter approval comments (optional):' : 'Enter rejection reason:');
+  if (action === 'reject' && !comments) {
+    alert('Please provide a reason for rejection.');
+    return;
+  }
 
-  const handlePrincipalAction = (leaveId, action, comments = '') => {
-    setLeaves(prev => prev.map(leave => {
-      if (leave.id === leaveId) {
-        const updatedLeave = {
-          ...leave,
-          status: action === 'approve' ? 'Approved by Principal' : 'Rejected by Principal',
-          approverComments: leave.approverComments + '\n' + comments,
-          principalApprovalDate: new Date().toISOString()
-        };
-        
-        addNotification(
-          leave.staffEmail,
-          action === 'approve'
-            ? `🎉 Your leave application has been approved by the Principal. You may proceed with your leave.`
-            : `Your leave application has been rejected by the Principal. Reason: ${comments}`,
-          leaveId
-        );
-        
-        return updatedLeave;
-      }
-      return leave;
-    }));
-  };
+  setLoading(true);
+  setEmailStatus('Processing and sending email notification...');
+  
+  const result = await hodAction(leaveId, action, comments || '');
+  
+  if (result.success) {
+    await fetchLeaves(userData);
+    setEmailStatus('✅ Action completed and email sent!');
+    alert(`Leave ${action === 'approve' ? 'approved' : 'rejected'} successfully! Email notification sent to staff.`);
+    
+    setTimeout(() => setEmailStatus(''), 3000);
+  } else {
+    setEmailStatus('');
+    alert(result.error || 'Error processing leave');
+  }
+  
+  setLoading(false);
+};
 
-  // Login Page
-  if (!currentUser) {
+// Update handlePrincipalAction similarly
+const handlePrincipalAction = async (leaveId, action) => {
+  const comments = prompt(action === 'approve' ? 'Enter final approval comments (optional):' : 'Enter rejection reason:');
+  if (action === 'reject' && !comments) {
+    alert('Please provide a reason for rejection.');
+    return;
+  }
+
+  setLoading(true);
+  setEmailStatus('Processing and sending email notification...');
+  
+  const result = await principalAction(leaveId, action, comments || '');
+  
+  if (result.success) {
+    await fetchLeaves(userData);
+    setEmailStatus('✅ Final decision made and email sent!');
+    alert(`Leave ${action === 'approve' ? 'approved' : 'rejected'} successfully! Email notification sent to staff.`);
+    
+    setTimeout(() => setEmailStatus(''), 3000);
+  } else {
+    setEmailStatus('');
+    alert(result.error || 'Error processing leave');
+  }
+  
+  setLoading(false);
+};
+
+  if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
-        <div className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md">
-          <div className="text-center mb-8">
-            <div className="bg-indigo-600 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
-              <User className="text-white" size={32} />
-            </div>
-            <h1 className="text-3xl font-bold text-gray-800">College Leave Management</h1>
-            <p className="text-gray-600 mt-2">Sign in to continue</p>
-          </div>
-          
-          <form onSubmit={handleLogin} className="space-y-6">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Email Address</label>
-              <input
-                type="email"
-                required
-                value={loginForm.email}
-                onChange={(e) => setLoginForm({...loginForm, email: e.target.value})}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                placeholder="Enter your email"
-              />
-            </div>
-            
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Password</label>
-              <input
-                type="password"
-                required
-                value={loginForm.password}
-                onChange={(e) => setLoginForm({...loginForm, password: e.target.value})}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                placeholder="Enter your password"
-              />
-            </div>
-            
-            <button
-              type="submit"
-              className="w-full bg-indigo-600 text-white py-3 rounded-lg font-semibold hover:bg-indigo-700 transition-colors"
-            >
-              Sign In
-            </button>
-          </form>
-          
-          <div className="mt-8 p-4 bg-gray-50 rounded-lg">
-            <p className="text-sm font-semibold text-gray-700 mb-2">Demo Credentials:</p>
-            <div className="text-xs text-gray-600 space-y-1">
-              <p>Staff: staff@example.com</p>
-              <p>HOD: hod@example.com</p>
-              <p>Principal: principal@example.com</p>
-              <p>Admin: admin@example.com</p>
-              <p className="mt-2 font-medium">Password: 123456</p>
-            </div>
-          </div>
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-indigo-600 mx-auto"></div>
+          <p className="mt-4 text-gray-600">Loading...</p>
         </div>
       </div>
     );
   }
 
-  // Staff Dashboard
+  // Login/Signup Page
+  if (!currentUser || !userData) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md">
+          <div className="text-center mb-8">
+            <img src={logo} alt="STBCOE Logo" className="w-24 h-24 mx-auto mb-4 object-contain" />
+            <h1 className="text-3xl font-bold text-gray-800">STBCOE</h1>
+            <p className="text-xl text-indigo-600 font-semibold mt-1">Leave Management System</p>
+            <p className="text-gray-600 mt-2">{isLogin ? 'Sign in to continue' : 'Create your account'}</p>
+          </div>
+          
+          <div className="flex gap-2 mb-6">
+            <button
+              onClick={() => setIsLogin(true)}
+              className={`flex-1 py-2 rounded-lg font-semibold transition-colors ${
+                isLogin ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-600'
+              }`}
+            >
+              Login
+            </button>
+            <button
+              onClick={() => setIsLogin(false)}
+              className={`flex-1 py-2 rounded-lg font-semibold transition-colors ${
+                !isLogin ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-600'
+              }`}
+            >
+              Sign Up
+            </button>
+          </div>
+
+          {isLogin ? (
+            <form onSubmit={handleLogin} className="space-y-6">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Email Address</label>
+                <input
+                  type="email"
+                  required
+                  value={loginForm.email}
+                  onChange={(e) => setLoginForm({...loginForm, email: e.target.value})}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  placeholder="Enter your email"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Password</label>
+                <input
+                  type="password"
+                  required
+                  value={loginForm.password}
+                  onChange={(e) => setLoginForm({...loginForm, password: e.target.value})}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  placeholder="Enter your password"
+                />
+              </div>
+              
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full bg-indigo-600 text-white py-3 rounded-lg font-semibold hover:bg-indigo-700 transition-colors disabled:opacity-50"
+              >
+                {loading ? 'Signing In...' : 'Sign In'}
+              </button>
+            </form>
+          ) : (
+            <form onSubmit={handleSignup} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Full Name</label>
+                <input
+                  type="text"
+                  required
+                  value={signupForm.fullName}
+                  onChange={(e) => setSignupForm({...signupForm, fullName: e.target.value})}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  placeholder="Dr. John Doe"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Email Address</label>
+                <input
+                  type="email"
+                  required
+                  value={signupForm.email}
+                  onChange={(e) => setSignupForm({...signupForm, email: e.target.value})}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  placeholder="john@stbcoe.edu"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Department</label>
+                <select
+                  required
+                  value={signupForm.department}
+                  onChange={(e) => setSignupForm({...signupForm, department: e.target.value})}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                >
+                  <option value="">Select Department</option>
+                  <option value="Computer Science Engineering">CSE</option>
+                  <option value="Civil">Civil</option>
+                  <option value="Electronics and Telecommunication">E&TC</option>
+                  <option value="Library">Library</option>
+                  <option value="Mechanical">Mechanical</option>
+                  <option value="Office">Office</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Role</label>
+                <select
+                  required
+                  value={signupForm.role}
+                  onChange={(e) => setSignupForm({...signupForm, role: e.target.value})}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                >
+                  <option value="staff">Staff</option>
+                  <option value="hod">Head of Department (HOD)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Password</label>
+                <input
+                  type="password"
+                  required
+                  minLength="6"
+                  value={signupForm.password}
+                  onChange={(e) => setSignupForm({...signupForm, password: e.target.value})}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  placeholder="Minimum 6 characters"
+                />
+              </div>
+              
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full bg-indigo-600 text-white py-3 rounded-lg font-semibold hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                <UserPlus size={20} />
+                {loading ? 'Creating Account...' : 'Create Account'}
+              </button>
+            </form>
+          )}
+
+          {isLogin && (
+  <>
+    <div className="mt-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
+      <p className="text-sm font-semibold text-blue-900 mb-2">Principal Login:</p>
+      <p className="text-xs text-blue-700">Email: principal@stbcoe.edu</p>
+      <p className="text-xs text-blue-700">Password: Principal@123</p>
+    </div>
+    
+  
+  </>
+)}
+        </div>
+      </div>
+    );
+  }
+
   const StaffDashboard = () => {
-    const userLeaves = leaves.filter(l => l.staffEmail === currentUser.email);
-    const userNotifications = notifications.filter(n => n.userId === currentUser.email);
+    const userLeaves = leaves.filter(l => l.staffId === userData.uid);
     
     const stats = {
       pending: userLeaves.filter(l => l.status === 'Pending').length,
@@ -282,22 +477,12 @@ const LeaveManagementSystem = () => {
             </div>
           </div>
         </div>
-
-        {userNotifications.length > 0 && (
-          <div className="bg-blue-50 border-l-4 border-blue-500 p-4 rounded">
-            <h3 className="font-semibold text-blue-900 mb-2">Recent Notifications</h3>
-            <div className="space-y-2">
-              {userNotifications.slice(-3).reverse().map(notif => (
-                <p key={notif.id} className="text-sm text-blue-800">{notif.message}</p>
-              ))}
-            </div>
-          </div>
-        )}
+        
+        
       </div>
     );
   };
 
-  // Apply Leave Form
   const ApplyLeaveForm = () => (
     <div className="bg-white rounded-xl shadow-lg p-8">
       <h2 className="text-2xl font-bold text-gray-800 mb-6">Apply for Leave</h2>
@@ -357,21 +542,17 @@ const LeaveManagementSystem = () => {
 
         <button
           type="submit"
-          className="w-full bg-indigo-600 text-white py-3 rounded-lg font-semibold hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2"
+          disabled={loading}
+          className="w-full bg-indigo-600 text-white py-3 rounded-lg font-semibold hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
         >
           <Send size={20} />
-          Submit Leave Application
+          {loading ? 'Submitting...' : 'Submit Leave Application'}
         </button>
       </form>
     </div>
   );
 
-  // Leave History
   const LeaveHistory = () => {
-    const userLeaves = currentUser.role === 'admin' 
-      ? leaves 
-      : leaves.filter(l => l.staffEmail === currentUser.email);
-
     const getStatusColor = (status) => {
       if (status === 'Approved by Principal') return 'bg-green-100 text-green-800 border-green-300';
       if (status.includes('Rejected')) return 'bg-red-100 text-red-800 border-red-300';
@@ -382,11 +563,11 @@ const LeaveManagementSystem = () => {
     return (
       <div className="bg-white rounded-xl shadow-lg p-8">
         <h2 className="text-2xl font-bold text-gray-800 mb-6">Leave History</h2>
-        {userLeaves.length === 0 ? (
+        {leaves.length === 0 ? (
           <p className="text-gray-500 text-center py-8">No leave applications found.</p>
         ) : (
           <div className="space-y-4">
-            {userLeaves.map(leave => (
+            {leaves.map(leave => (
               <div key={leave.id} className="border border-gray-200 rounded-lg p-6 hover:shadow-md transition-shadow">
                 <div className="flex justify-between items-start mb-4">
                   <div>
@@ -401,11 +582,11 @@ const LeaveManagementSystem = () => {
                 <div className="grid grid-cols-2 gap-4 mb-4">
                   <div>
                     <p className="text-xs text-gray-500">From</p>
-                    <p className="font-medium">{new Date(leave.startDate).toLocaleDateString()}</p>
+                    <p className="font-medium">{leave.startDate}</p>
                   </div>
                   <div>
                     <p className="text-xs text-gray-500">To</p>
-                    <p className="font-medium">{new Date(leave.endDate).toLocaleDateString()}</p>
+                    <p className="font-medium">{leave.endDate}</p>
                   </div>
                 </div>
                 
@@ -414,10 +595,11 @@ const LeaveManagementSystem = () => {
                   <p className="text-sm text-gray-700">{leave.reason}</p>
                 </div>
 
-                {leave.approverComments && (
+                {(leave.hodComments || leave.principalComments) && (
                   <div className="bg-gray-50 p-3 rounded">
                     <p className="text-xs text-gray-500 mb-1">Comments</p>
-                    <p className="text-sm text-gray-700">{leave.approverComments}</p>
+                    {leave.hodComments && <p className="text-sm text-gray-700 mb-1">HOD: {leave.hodComments}</p>}
+                    {leave.principalComments && <p className="text-sm text-gray-700">Principal: {leave.principalComments}</p>}
                   </div>
                 )}
               </div>
@@ -428,20 +610,9 @@ const LeaveManagementSystem = () => {
     );
   };
 
-  // HOD Dashboard
   const HODDashboard = () => {
-    const pendingLeaves = leaves.filter(l => l.status === 'Pending' && l.department === currentUser.department);
-    const approvedLeaves = leaves.filter(l => l.status === 'Approved by HOD' && l.department === currentUser.department);
-
-    const handleAction = (leaveId, action) => {
-      const comments = prompt(action === 'approve' ? 'Enter approval comments (optional):' : 'Enter rejection reason:');
-      if (action === 'reject' && !comments) {
-        alert('Please provide a reason for rejection.');
-        return;
-      }
-      handleHODAction(leaveId, action, comments || '');
-    };
-
+    const pendingLeaves = leaves.filter(l => l.status === 'Pending');
+    const approvedLeaves = leaves.filter(l => l.status === 'Approved by HOD');
     return (
       <div className="space-y-6">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -478,15 +649,14 @@ const LeaveManagementSystem = () => {
                     <div>
                       <h3 className="font-semibold text-lg text-gray-800">{leave.staffName}</h3>
                       <p className="text-sm text-gray-600">{leave.leaveType}</p>
+                      <p className="text-xs text-gray-500">{leave.staffEmail}</p>
                     </div>
                   </div>
                   
                   <div className="grid grid-cols-2 gap-4 mb-4">
                     <div>
                       <p className="text-xs text-gray-500">Duration</p>
-                      <p className="font-medium">
-                        {new Date(leave.startDate).toLocaleDateString()} - {new Date(leave.endDate).toLocaleDateString()}
-                      </p>
+                      <p className="font-medium">{leave.startDate} - {leave.endDate}</p>
                     </div>
                   </div>
                   
@@ -497,15 +667,17 @@ const LeaveManagementSystem = () => {
 
                   <div className="flex gap-3">
                     <button
-                      onClick={() => handleAction(leave.id, 'approve')}
-                      className="flex-1 bg-green-600 text-white py-2 rounded-lg font-semibold hover:bg-green-700 transition-colors flex items-center justify-center gap-2"
+                      onClick={() => handleHODAction(leave.id, 'approve')}
+                      disabled={loading}
+                      className="flex-1 bg-green-600 text-white py-2 rounded-lg font-semibold hover:bg-green-700 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
                     >
                       <CheckCircle size={18} />
                       Approve & Forward
                     </button>
                     <button
-                      onClick={() => handleAction(leave.id, 'reject')}
-                      className="flex-1 bg-red-600 text-white py-2 rounded-lg font-semibold hover:bg-red-700 transition-colors flex items-center justify-center gap-2"
+                      onClick={() => handleHODAction(leave.id, 'reject')}
+                      disabled={loading}
+                      className="flex-1 bg-red-600 text-white py-2 rounded-lg font-semibold hover:bg-red-700 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
                     >
                       <XCircle size={18} />
                       Reject
@@ -520,19 +692,8 @@ const LeaveManagementSystem = () => {
     );
   };
 
-  // Principal Dashboard
   const PrincipalDashboard = () => {
     const forwardedLeaves = leaves.filter(l => l.status === 'Approved by HOD');
-
-    const handleAction = (leaveId, action) => {
-      const comments = prompt(action === 'approve' ? 'Enter final approval comments (optional):' : 'Enter rejection reason:');
-      if (action === 'reject' && !comments) {
-        alert('Please provide a reason for rejection.');
-        return;
-      }
-      handlePrincipalAction(leaveId, action, comments || '');
-    };
-
     return (
       <div className="space-y-6">
         <div className="bg-blue-50 p-6 rounded-xl border-2 border-blue-200">
@@ -557,6 +718,7 @@ const LeaveManagementSystem = () => {
                     <div>
                       <h3 className="font-semibold text-lg text-gray-800">{leave.staffName}</h3>
                       <p className="text-sm text-gray-600">{leave.department} - {leave.leaveType}</p>
+                      <p className="text-xs text-gray-500">{leave.staffEmail}</p>
                     </div>
                     <span className="px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800">
                       HOD Approved
@@ -566,9 +728,7 @@ const LeaveManagementSystem = () => {
                   <div className="grid grid-cols-2 gap-4 mb-4">
                     <div>
                       <p className="text-xs text-gray-500">Duration</p>
-                      <p className="font-medium">
-                        {new Date(leave.startDate).toLocaleDateString()} - {new Date(leave.endDate).toLocaleDateString()}
-                      </p>
+                      <p className="font-medium">{leave.startDate} - {leave.endDate}</p>
                     </div>
                   </div>
                   
@@ -577,24 +737,26 @@ const LeaveManagementSystem = () => {
                     <p className="text-sm text-gray-700">{leave.reason}</p>
                   </div>
 
-                  {leave.approverComments && (
+                  {leave.hodComments && (
                     <div className="bg-blue-50 p-3 rounded mb-4">
                       <p className="text-xs text-gray-500 mb-1">HOD Comments</p>
-                      <p className="text-sm text-gray-700">{leave.approverComments}</p>
+                      <p className="text-sm text-gray-700">{leave.hodComments}</p>
                     </div>
                   )}
 
                   <div className="flex gap-3">
                     <button
-                      onClick={() => handleAction(leave.id, 'approve')}
-                      className="flex-1 bg-green-600 text-white py-2 rounded-lg font-semibold hover:bg-green-700 transition-colors flex items-center justify-center gap-2"
+                      onClick={() => handlePrincipalAction(leave.id, 'approve')}
+                      disabled={loading}
+                      className="flex-1 bg-green-600 text-white py-2 rounded-lg font-semibold hover:bg-green-700 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
                     >
                       <CheckCircle size={18} />
                       Final Approve
                     </button>
                     <button
-                      onClick={() => handleAction(leave.id, 'reject')}
-                      className="flex-1 bg-red-600 text-white py-2 rounded-lg font-semibold hover:bg-red-700 transition-colors flex items-center justify-center gap-2"
+                      onClick={() => handlePrincipalAction(leave.id, 'reject')}
+                      disabled={loading}
+                      className="flex-1 bg-red-600 text-white py-2 rounded-lg font-semibold hover:bg-red-700 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
                     >
                       <XCircle size={18} />
                       Reject
@@ -609,16 +771,17 @@ const LeaveManagementSystem = () => {
     );
   };
 
-  // Main Layout
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
       <header className="bg-indigo-600 text-white shadow-lg">
         <div className="container mx-auto px-4 py-4">
           <div className="flex justify-between items-center">
-            <div>
-              <h1 className="text-2xl font-bold">College Leave Management System</h1>
-              <p className="text-indigo-200 text-sm">{currentUser.name} - {currentUser.role.toUpperCase()}</p>
+            <div className="flex items-center gap-4">
+              <img src={logo} alt="STBCOE Logo" className="w-12 h-12 object-contain bg-white rounded-full p-1" />
+              <div>
+                <h1 className="text-2xl font-bold">STBCOE - Leave Management System</h1>
+                <p className="text-indigo-200 text-sm">{userData?.fullName} - {userData?.role.toUpperCase()}</p>
+              </div>
             </div>
             <button
               onClick={handleLogout}
@@ -630,14 +793,13 @@ const LeaveManagementSystem = () => {
           </div>
         </div>
       </header>
-
+      
       <div className="container mx-auto px-4 py-8">
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-          {/* Sidebar */}
           <div className="lg:col-span-1">
             <div className="bg-white rounded-xl shadow-lg p-6">
               <nav className="space-y-2">
-                {currentUser.role === 'staff' && (
+                {userData?.role === 'staff' && (
                   <>
                     <button
                       onClick={() => setActiveView('dashboard')}
@@ -669,7 +831,7 @@ const LeaveManagementSystem = () => {
                   </>
                 )}
 
-                {(currentUser.role === 'hod' || currentUser.role === 'principal' || currentUser.role === 'admin') && (
+                {(userData?.role === 'hod' || userData?.role === 'principal') && (
                   <>
                     <button
                       onClick={() => setActiveView('dashboard')}
@@ -695,9 +857,8 @@ const LeaveManagementSystem = () => {
             </div>
           </div>
 
-          {/* Main Content */}
           <div className="lg:col-span-3">
-            {currentUser.role === 'staff' && (
+            {userData?.role === 'staff' && (
               <>
                 {activeView === 'dashboard' && <StaffDashboard />}
                 {activeView === 'apply' && <ApplyLeaveForm />}
@@ -705,100 +866,33 @@ const LeaveManagementSystem = () => {
               </>
             )}
 
-            {currentUser.role === 'hod' && (
+            {userData?.role === 'hod' && (
               <>
                 {activeView === 'dashboard' && <HODDashboard />}
                 {activeView === 'history' && <LeaveHistory />}
               </>
             )}
 
-            {currentUser.role === 'principal' && (
+            {userData?.role === 'principal' && (
               <>
                 {activeView === 'dashboard' && <PrincipalDashboard />}
-                {activeView === 'history' && <LeaveHistory />}
-              </>
-            )}
-
-            {currentUser.role === 'admin' && (
-              <>
-                {activeView === 'dashboard' && (
-                  <div className="space-y-6">
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-                      <div className="bg-purple-50 p-6 rounded-xl border-2 border-purple-200">
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <p className="text-purple-700 text-sm font-medium">Total Requests</p>
-                            <p className="text-3xl font-bold text-purple-900">{leaves.length}</p>
-                          </div>
-                          <FileText className="text-purple-600" size={40} />
-                        </div>
-                      </div>
-                      <div className="bg-yellow-50 p-6 rounded-xl border-2 border-yellow-200">
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <p className="text-yellow-700 text-sm font-medium">Pending</p>
-                            <p className="text-3xl font-bold text-yellow-900">
-                              {leaves.filter(l => l.status === 'Pending').length}
-                            </p>
-                          </div>
-                          <Clock className="text-yellow-600" size={40} />
-                        </div>
-                      </div>
-                      <div className="bg-green-50 p-6 rounded-xl border-2 border-green-200">
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <p className="text-green-700 text-sm font-medium">Approved</p>
-                            <p className="text-3xl font-bold text-green-900">
-                              {leaves.filter(l => l.status === 'Approved by Principal').length}
-                            </p>
-                          </div>
-                          <CheckCircle className="text-green-600" size={40} />
-                        </div>
-                      </div>
-                      <div className="bg-red-50 p-6 rounded-xl border-2 border-red-200">
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <p className="text-red-700 text-sm font-medium">Rejected</p>
-                            <p className="text-3xl font-bold text-red-900">
-                              {leaves.filter(l => l.status.includes('Rejected')).length}
-                            </p>
-                          </div>
-                          <XCircle className="text-red-600" size={40} />
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="bg-white rounded-xl shadow-lg p-8">
-                      <h2 className="text-2xl font-bold text-gray-800 mb-6">System Overview</h2>
-                      <div className="space-y-4">
-                        <div className="flex justify-between items-center p-4 bg-gray-50 rounded-lg">
-                          <span className="font-medium">Total Users</span>
-                          <span className="text-2xl font-bold text-indigo-600">
-                            {Object.keys(DEMO_USERS).length}
-                          </span>
-                        </div>
-                        <div className="flex justify-between items-center p-4 bg-gray-50 rounded-lg">
-                          <span className="font-medium">Active Notifications</span>
-                          <span className="text-2xl font-bold text-indigo-600">
-                            {notifications.length}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
                 {activeView === 'history' && <LeaveHistory />}
               </>
             )}
           </div>
         </div>
       </div>
+      {/* Email Status Notification */}
+{emailStatus && (
+  <div className="fixed bottom-4 right-4 bg-indigo-600 text-white px-6 py-3 rounded-lg shadow-lg animate-bounce">
+    {emailStatus}
+  </div>
+)}
 
-      {/* Footer */}
       <footer className="bg-white border-t mt-12">
         <div className="container mx-auto px-4 py-6">
           <p className="text-center text-gray-600 text-sm">
-            © 2025 College Leave Management System. All rights reserved.
+            © 2025 STBCOE Leave Management System. All rights reserved.
           </p>
         </div>
       </footer>
@@ -806,4 +900,4 @@ const LeaveManagementSystem = () => {
   );
 };
 
-export default LeaveManagementSystem;
+export default App;
