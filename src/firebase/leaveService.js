@@ -12,20 +12,20 @@ import {
   getDoc
 } from 'firebase/firestore';
 import { db } from './config';
-import { sendLeaveStatusEmail, getStatusMessage } from '../services/emailService';
+import { sendLeaveStatusEmail } from '../services/emailService';
 
 // Apply for leave
 export const applyLeave = async (leaveData, userData) => {
   try {
     const leave = {
       staffId: userData.uid,
-      staff_name: userData.fullName,     // matches EmailJS
+      staffName: userData.fullName,        // FIXED: Changed from staff_name to staffName
       staffEmail: userData.email,
       department: userData.department,
 
-      leave_type: leaveData.leaveType,   // matches EmailJS
-      start_date: leaveData.startDate,   // matches EmailJS
-      end_date: leaveData.endDate,       // matches EmailJS
+      leaveType: leaveData.leaveType,      // FIXED: Changed from leave_type to leaveType
+      startDate: leaveData.startDate,      // FIXED: Changed from start_date to startDate
+      endDate: leaveData.endDate,          // FIXED: Changed from end_date to endDate
       reason: leaveData.reason,
 
       status: 'Pending',
@@ -35,7 +35,6 @@ export const applyLeave = async (leaveData, userData) => {
       hodApprovalDate: null,
       principalApprovalDate: null
     };
-
 
     const docRef = await addDoc(collection(db, 'leaves'), leave);
     

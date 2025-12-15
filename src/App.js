@@ -1,10 +1,102 @@
+//App.js
 import React, { useState, useEffect } from 'react';
 import { LogOut, Send, CheckCircle, XCircle, Clock, FileText, Home, UserPlus } from 'lucide-react';
 import { signUp, signIn, logout, onAuthChange } from './firebase/authService';
 import { applyLeave, getUserLeaves, getAllLeaves, hodAction, principalAction } from './firebase/leaveService';
 import logo from './assets/logo.png';
-import { collection, getDocs } from 'firebase/firestore';
-import { db } from './firebase/config';
+
+
+const ApplyLeaveForm = ({ leaveForm, setLeaveForm, handleApplyLeave, loading }) => {
+  // Create separate handler functions to prevent re-rendering issues
+  const handleLeaveTypeChange = (e) => {
+    const value = e.target.value;
+    setLeaveForm(prev => ({...prev, leaveType: value}));
+  };
+
+  const handleStartDateChange = (e) => {
+    const value = e.target.value;
+    setLeaveForm(prev => ({...prev, startDate: value}));
+  };
+
+  const handleEndDateChange = (e) => {
+    const value = e.target.value;
+    setLeaveForm(prev => ({...prev, endDate: value}));
+  };
+
+  const handleReasonChange = (e) => {
+    const value = e.target.value;
+    setLeaveForm(prev => ({...prev, reason: value}));
+  };
+
+  return (
+    <div className="bg-white rounded-xl shadow-lg p-8">
+      <h2 className="text-2xl font-bold text-gray-800 mb-6">Apply for Leave</h2>
+      <form onSubmit={handleApplyLeave} className="space-y-6">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">Leave Type</label>
+          <select
+            value={leaveForm.leaveType}
+            onChange={handleLeaveTypeChange}
+            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+            required
+          >
+            <option>Sick Leave</option>
+            <option>Casual Leave</option>
+            <option>Earned Leave</option>
+            <option>Maternity Leave</option>
+            <option>Paternity Leave</option>
+            <option>Emergency Leave</option>
+          </select>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Start Date</label>
+            <input
+              type="date"
+              value={leaveForm.startDate}
+              onChange={handleStartDateChange}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">End Date</label>
+            <input
+              type="date"
+              value={leaveForm.endDate}
+              onChange={handleEndDateChange}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+              required
+            />
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">Reason for Leave</label>
+          <textarea
+            value={leaveForm.reason}
+            onChange={handleReasonChange}
+            rows="4"
+            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+            placeholder="Please provide a detailed reason for your leave..."
+            required
+          />
+        </div>
+
+        <button
+          type="submit"
+          disabled={loading}
+          className="w-full bg-indigo-600 text-white py-3 rounded-lg font-semibold hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+        >
+          <Send size={20} />
+          {loading ? 'Submitting...' : 'Submit Leave Application'}
+        </button>
+      </form>
+    </div>
+  );
+}
 
 const App = () => {
   const [emailStatus, setEmailStatus] = useState('');
@@ -67,68 +159,6 @@ const App = () => {
     }
   };
   // Add this function in App.js
-const checkPrincipalStatus = async () => {
-  try {
-    console.log('=== CHECKING PRINCIPAL STATUS ===');
-    
-    // Try to sign in to see if account exists
-    const { signInWithEmailAndPassword } = await import('firebase/auth');
-    const { auth } = await import('./firebase/config');
-    
-    try {
-      const result = await signInWithEmailAndPassword(
-        auth, 
-        'principal@stbcoe.edu', 
-        'Principal@123'
-      );
-      console.log('✅ Principal account EXISTS in Authentication');
-      console.log('Principal UID:', result.user.uid);
-      
-      // Check Firestore
-      const { getDoc, doc } = await import('firebase/firestore');
-      const { db } = await import('./firebase/config');
-      
-      const userDoc = await getDoc(doc(db, 'users', result.user.uid));
-      if (userDoc.exists()) {
-        console.log('✅ Principal data EXISTS in Firestore');
-        console.log('Principal data:', userDoc.data());
-      } else {
-        console.log('❌ Principal data MISSING in Firestore');
-      }
-      
-    } catch (authError) {
-      console.log('❌ Principal account NOT FOUND in Authentication');
-      console.log('Auth error code:', authError.code);
-      console.log('Auth error message:', authError.message);
-    }
-    
-  } catch (error) {
-    console.error('Error checking principal status:', error);
-  }
-};
-  
-  const debugFirestore = async () => {
-    console.log('=== DEBUG FIRESTORE ===');
-    console.log('Current user UID:', currentUser?.uid);
-    console.log('User data:', userData);
-    
-    try {
-      const querySnapshot = await getDocs(collection(db, 'leaves'));
-      const allLeaves = [];
-      querySnapshot.forEach((doc) => {
-        allLeaves.push({ id: doc.id, ...doc.data() });
-      });
-      
-      console.log('All documents in leaves collection:', allLeaves);
-      console.log('Total documents:', allLeaves.length);
-      
-      const myLeaves = allLeaves.filter(leave => leave.staffId === userData?.uid);
-      console.log('My leaves:', myLeaves);
-      
-    } catch (error) {
-      console.error('Debug query error:', error);
-    }
-  };
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -379,6 +409,7 @@ const handlePrincipalAction = async (leaveId, action) => {
                   <option value="Library">Library</option>
                   <option value="Mechanical">Mechanical</option>
                   <option value="Office">Office</option>
+                  <option value="Peon">Peon</option>
                 </select>
               </div>
 
@@ -421,13 +452,6 @@ const handlePrincipalAction = async (leaveId, action) => {
 
           {isLogin && (
   <>
-    <div className="mt-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
-      <p className="text-sm font-semibold text-blue-900 mb-2">Principal Login:</p>
-      <p className="text-xs text-blue-700">Email: principal@stbcoe.edu</p>
-      <p className="text-xs text-blue-700">Password: Principal@123</p>
-    </div>
-    
-  
   </>
 )}
         </div>
@@ -483,74 +507,6 @@ const handlePrincipalAction = async (leaveId, action) => {
     );
   };
 
-  const ApplyLeaveForm = () => (
-    <div className="bg-white rounded-xl shadow-lg p-8">
-      <h2 className="text-2xl font-bold text-gray-800 mb-6">Apply for Leave</h2>
-      <form onSubmit={handleApplyLeave} className="space-y-6">
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">Leave Type</label>
-          <select
-            value={leaveForm.leaveType}
-            onChange={(e) => setLeaveForm({...leaveForm, leaveType: e.target.value})}
-            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
-            required
-          >
-            <option>Sick Leave</option>
-            <option>Casual Leave</option>
-            <option>Earned Leave</option>
-            <option>Maternity Leave</option>
-            <option>Paternity Leave</option>
-            <option>Emergency Leave</option>
-          </select>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Start Date</label>
-            <input
-              type="date"
-              value={leaveForm.startDate}
-              onChange={(e) => setLeaveForm({...leaveForm, startDate: e.target.value})}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
-              required
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">End Date</label>
-            <input
-              type="date"
-              value={leaveForm.endDate}
-              onChange={(e) => setLeaveForm({...leaveForm, endDate: e.target.value})}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
-              required
-            />
-          </div>
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">Reason for Leave</label>
-          <textarea
-            value={leaveForm.reason}
-            onChange={(e) => setLeaveForm({...leaveForm, reason: e.target.value})}
-            rows="4"
-            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
-            placeholder="Please provide a detailed reason for your leave..."
-            required
-          />
-        </div>
-
-        <button
-          type="submit"
-          disabled={loading}
-          className="w-full bg-indigo-600 text-white py-3 rounded-lg font-semibold hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
-        >
-          <Send size={20} />
-          {loading ? 'Submitting...' : 'Submit Leave Application'}
-        </button>
-      </form>
-    </div>
-  );
 
   const LeaveHistory = () => {
     const getStatusColor = (status) => {
@@ -861,7 +817,14 @@ const handlePrincipalAction = async (leaveId, action) => {
             {userData?.role === 'staff' && (
               <>
                 {activeView === 'dashboard' && <StaffDashboard />}
-                {activeView === 'apply' && <ApplyLeaveForm />}
+                {activeView === 'apply' && (
+  <ApplyLeaveForm 
+    leaveForm={leaveForm}
+    setLeaveForm={setLeaveForm}
+    handleApplyLeave={handleApplyLeave}
+    loading={loading}
+  />
+)}
                 {activeView === 'history' && <LeaveHistory />}
               </>
             )}
